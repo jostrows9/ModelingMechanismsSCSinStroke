@@ -196,3 +196,6 @@ cython_debug/
 # NEURON 
 x86_64/
 arm64/
+
+
+data/
