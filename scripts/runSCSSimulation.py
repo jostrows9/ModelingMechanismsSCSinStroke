@@ -1,3 +1,4 @@
+from itertools import product
 import pickle
 import sys
 sys.path.append('../ModelingMechanismsSCSinStroke')
@@ -8,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random as rnd
 import os
+from multiprocessing import Pool
 
 def plot_simulation_results(data): 
 
@@ -127,16 +129,15 @@ def run_scs_simulation_rdd(scs_freq,
                            num_aff=30,
                            Tw=80, 
                            Ta=20,
-                           Tx=20,
                            p_axonal_success=1, 
-                           Uw=0.5,
+                           Uw=0.6,
+                           simulation_duration=200,
                            plot_results=True, 
                            save_data_folder='',
                            seed=672945):
     
     # model parameters
     num_mns = 100
-    simulation_duration = 200
     synaptic_weight = 0.000148
     synaptic_shape = 1.2
 
@@ -164,11 +165,9 @@ def run_scs_simulation_rdd(scs_freq,
                                                     sim_dur=simulation_duration,
                                                     scs_freq=scs_freq,
                                                     n_axons=num_aff,
-                                                    p_axonal_success=p_axonal_success,
-                                                    Tx=Tx,
                                                     Tw=Tw,
                                                     Uw=Uw,
-                                                    Ta=Ta,
+                                                    p_axonal_success=p_axonal_success,
                                                     seed=seed,
                                                 )
         
@@ -178,7 +177,7 @@ def run_scs_simulation_rdd(scs_freq,
             pre.interval = 1000/scs_freq
             pre.noise = 0
             pre.number = 1e999
-            pre.start = 17 # ms, max latency of spike in synapse + delay
+            pre.start = 50 # ms, delay
             syn = h.ExpSyn(mns[imn].soma(0.5))
             syn.tau = 2 # ms
             nc = h.NetCon(pre, syn)
@@ -212,7 +211,7 @@ def run_scs_simulation_rdd(scs_freq,
         pre.interval = 1000/supra_freq
         pre.noise = 1
         pre.number = 1e999
-        pre.start = 10 # ms
+        pre.start = 50 # ms
         supra_neurons.append(pre)
 
     supra_inputs = []
@@ -279,7 +278,7 @@ def run_scs_simulation_rdd(scs_freq,
 
     emg_signal = estimateEMG(firings_mat)
     p2p_amp = estimateP2PAmp(emg_signal, scs_times)
-
+    
     data={}
     data["mn_spikes"] = mn_times
     data["supraspinal_spike_times"] = supra_times
@@ -297,7 +296,7 @@ def run_scs_simulation_rdd(scs_freq,
     data["membrane_potentials"] = membrane_potentials
     data["p2p_amp"] = p2p_amp
     data["emg"] = emg_signal
-    data_filename = f"mnNum_{num_mns}_supraspinalNum_{num_supra}_supraspinalFR_{supra_freq}_SCSFreq_{scs_freq}_SCSTotal_{num_aff}_SynW_{synaptic_weight}_tx_{Tx}_tw_{Tw}_uw_{Uw}_ta_{Ta}_p_success_{p_axonal_success}_seed_{seed}.pickle"
+    data_filename = f"mnNum_{num_mns}_supraspinalNum_{num_supra}_supraspinalFR_{supra_freq}_SCSFreq_{scs_freq}_SCSTotal_{num_aff}_SynW_{synaptic_weight}_tw_{Tw}_uw_{Uw}_ta_{Ta}_p_success_{p_axonal_success}_seed_{seed}.pickle"
     
     if save_data_folder != '': 
         ensure_dir(save_data_folder)
@@ -314,16 +313,20 @@ def run_scs_simulation_rdd(scs_freq,
 
 if __name__ == '__main__':
     scs_freq = 80
-    # run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=True, p_axonal_success=0.3, Ta=0, Tw=80)
-    # run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=True, p_axonal_success=0.3, Ta=0, Tw=50)
-    # run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=True, p_axonal_success=0.4, Ta=0)
 
-    # plt.show()
+    #run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=True, p_axonal_success=0.3, simulation_duration=200, Tw=40, Uw=0.6, seed=1)
+    #run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=True, p_axonal_success=0.6, simulation_duration=200, Tw=40, Uw=0.6, seed=1)
+    
+    #plt.show()
 
     for i in range(20):
-        run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=False, p_axonal_success=0.3, Ta=0, Tw=80, seed=i, save_data_folder='data/rest_data_0.3_tw_80/') # rest
-        run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.5, Ta=0, Tw=20, seed=i, save_data_folder='data/25%_data_0.5_tw_20/') # max
-    #     run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=False, p_axonal_success=0.2, Ta=0, seed=i, save_data_folder='data/rest_data_0.2/') # rest
-    #     run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.4, Ta=0, seed=i, save_data_folder='data/25%_data_0.4/') # max
-    #     run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.6, Ta=0, seed=i, save_data_folder='data/25%_data_0.6/') # max
-    #     run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.6, Ta=0, seed=i, save_data_folder='data/25%_data_0.8/') # max
+        # longer simulation runs
+        run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=False, p_axonal_success=0.3, Uw=0.6, Tw=40, simulation_duration=2000, seed=i, save_data_folder=f'data/old_runs/2000ms_runs/rest_data_0.3_tw_40/') # rest
+        run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.6, Uw=0.6, Tw=40, simulation_duration=2000, seed=i, save_data_folder='data/old_runs/2000ms_runs/25%_data_0.6_tw_40/') # max, just reuptake
+        #run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.3, Uw=0, simulation_duration=2000, seed=i, save_data_folder='data/no_rdd_model/25%_data_0.3_uw_0/') # max, no pad
+
+        # # test tw values
+        # tw_opts = [20, 500]
+        # for tw in tw_opts: 
+        #     run_scs_simulation_rdd(scs_freq, num_supra=0, num_aff=30, plot_results=False, p_axonal_success=0.3, Ta=0, Tw=tw, seed=i, save_data_folder=f'data/2000ms_runs/rest_data_0.3_tw_{tw}/') # rest
+        #     run_scs_simulation_rdd(scs_freq, num_supra=15, num_aff=30, plot_results=False, p_axonal_success=0.6, Ta=0, Tw=tw, seed=i, save_data_folder=f'data/2000ms_runs/25%_data_0.6_tw_{tw}/') # max

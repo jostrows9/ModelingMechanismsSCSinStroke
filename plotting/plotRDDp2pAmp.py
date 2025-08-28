@@ -8,12 +8,17 @@ def double_exponential(x, A1, k1, A2, k2, C):
     return A1 * np.exp(-x/k1) + A2 * np.exp(-x/k2) + C
 
 title = 'Reuptake Model Alone'
-dataFolders = {'PAD & Reuptake Model': {'25% Effort': 'data/25%_data_0.5_tw_20', 
-                    'Rest': 'data/rest_data_0.3_tw_80'}, 
-               'PAD Model Alone': {'25% Effort': 'data/25%_data_0.5', 
-                    'Rest': 'data/rest_data_0.3'}, 
-               'Reuptake Model Alone': {'25% Effort': 'data/25%_data_tw_20', 
-                    'Rest': 'data/rest_data_tw_80'}
+path = 'data/old_runs/2000ms_runs'
+#path = 'data/old_runs/my_model/200ms_runs'
+#path = 'data/no_rdd_model'
+dataFolders = {'No PAD or Reuptake Model': {'25% Effort': '25%_data_0.5_tw_80', 
+                                'Rest': 'rest_data_0.3_tw_20'}, 
+                'PAD & Reuptake Model': {'25% Effort': '25%_data_0.5_tw_20', 
+                    'Rest': 'rest_data_0.3_tw_80'}, 
+               'PAD Model Alone': {'25% Effort': '25%_data_0.5_tw_80', 
+                    'Rest': 'rest_data_0.3_tw_40'}, 
+               'Reuptake Model Alone': {'25% Effort': '25%_data_0.3_tw_20', 
+                    'Rest': 'rest_data_0.3_tw_80'}
 }
 conditions = ["25% Effort", 'Rest']
 colors = ["#b01c3f", "#23b0cc"]
@@ -26,7 +31,7 @@ p2pNormData = {}
 emgAmps = {}
 
 for conInd in range(numCon): 
-    folder = dataFolders[title][conditions[conInd]]
+    folder = f"{path}/{dataFolders[title][conditions[conInd]]}"
     p2pNormData[conditions[conInd]] = []
     emgAmps[conditions[conInd]] = []
     for filename in os.listdir(folder):

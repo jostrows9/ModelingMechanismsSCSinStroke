@@ -11,6 +11,8 @@ Uw = 0.6 # Uw < 1, probability of vesicle release, OG: 0.06
 n_vesicle = 5 # number of vesicle docking sites
 
 def calculate_alpha(t, T1, T2, syn_w): 
+    if np.heaviside(t, t) == 0: 
+        return 0
     return (syn_w/(T2-T1))*np.heaviside(t, t)*(np.exp(-t/T2)-np.exp(-t/T1)) # post-synaptic conductance waveform
 
 def get_ia_afferent_synaptic_potential(sim_dur, 
@@ -19,14 +21,17 @@ def get_ia_afferent_synaptic_potential(sim_dur,
                                        Tw=25, 
                                        p_axonal_success=1, 
                                        Ux=2.5e-3,
-                                       dt=0.025): 
+                                       dt=0.025, 
+                                       seed=0): 
     # check if previous-run exists 
-    file_path = f"data/synaptic_potentials/synaptic_potential_SCS_freq_{scs_freq}_n_axons_{n_axons}_tw_{Tw}_p_success_{p_axonal_success}_dt_{dt}_simulation_duration_{sim_dur}_Ux_{Ux}.pickle"
-    if os.path.exists(file_path):
-        with open(file_path, 'rb') as f: 
-            data = pickle.load(f)
-            print("Synaptic potentials file already exists. Returning loaded data.")
-            return data['conductance']
+    # file_path = f"data/synaptic_potentials/synaptic_potential_SCS_freq_{scs_freq}_n_axons_{n_axons}_tw_{Tw}_p_success_{p_axonal_success}_dt_{dt}_simulation_duration_{sim_dur}_Ux_{Ux}.pickle"
+    # if os.path.exists(file_path):
+    #     with open(file_path, 'rb') as f: 
+    #         data = pickle.load(f)
+    #         print("Synaptic potentials file already exists. Returning loaded data.")
+    #         return data['conductance']
+
+    np.random.seed(seed) # set the seed so the network is always the same
     
     # set up variables related to conductance
     t_vec_len = int(sim_dur/dt)
@@ -54,8 +59,8 @@ def get_ia_afferent_synaptic_potential(sim_dur,
     data = {}
     data['conductance'] = g
     data['release'] = release_prob
-    with open(file_path, 'wb') as f: 
-        pickle.dump(data, f)
+    # with open(file_path, 'wb') as f: 
+    #     pickle.dump(data, f)
 
     return g
 
@@ -63,9 +68,10 @@ def get_ia_afferent_synaptic_potential(sim_dur,
 def get_ia_afferent_release_prob(sim_dur, 
                                        scs_freq, 
                                        n_axons, 
-                                       Tw=25, 
+                                       Tw=20, 
+                                       Tx=27,
                                        p_axonal_success=1, 
-                                       Ux=2.5e-3,
+                                       Ux=0.1, # OG: 0.0025,
                                        dt=0.025): 
     """
     Function for modeling axonal and synaptic failure in response to stimulation. 
@@ -78,17 +84,17 @@ def get_ia_afferent_release_prob(sim_dur,
 
     The following function predicts the postsynaptic conductance after axonal and synaptic failure.
     """
-
+   
     # adjust time-based parameters to dt 
     L = 3/dt # spike latency 
-    T_x = 100/dt # time constant for recovery # OG: 27
-    Tw = Tw/dt#Tw/dt # dt steps, mean of exponentially-distributed random variable for wait time before recovery, OG: 850
+    Tx = Tx/dt # time constant for recovery # OG: 27
+    Tw = Tw/dt # dt steps, mean of exponentially-distributed random variable for wait time before recovery, OG: 850
 
     # set up variables 
     t_vec_len = int(sim_dur/dt)
     n_all = np.random.poisson(lam=n_vesicle, size=[n_axons, t_vec_len]) # docked vesicles in each synapse, 0 < n_j < 5
     p = np.ones([n_axons, t_vec_len]) # probability of vesicle release
-    x = np.ones([n_axons, t_vec_len])*p_axonal_success # probability of action potential success in each axon, at each time t
+    x = np.ones([n_axons, t_vec_len]) # probability of action potential success in each axon, at each time t
     release = [[] for _ in range(n_axons)] # time of release of vesicles
     scs_pulses = [1 if np.mod(x, int(1/scs_freq*1000/dt)) == 0 else 0 for x in range(t_vec_len)] # pulses from SCS
 
@@ -110,15 +116,18 @@ def get_ia_afferent_release_prob(sim_dur,
                 x[j][t:] = x[j][t] - Ux*x[j][t]
             
             elif t+1 < t_vec_len:
-                x[j][t+1] = x[j][t]+(-x[j][t] + 1)/T_x # axonal recovery
+                x[j][t+1] = x[j][t]+(-x[j][t] + 1)/Tx # axonal recovery
 
     plt.figure(1)
-    plt.plot(x[0], label=f"{p_axonal_success} % starting axonal success, {Ux} % decrease axonal success")
+    plt.plot(x[0], label=f"{Tx}")
+    
+    plt.figure(3)
+    plt.plot(p[0])
     return release
 
 
 if __name__ == "__main__":
-    time = 200 # ms
+    time = 2000 # ms
     hz = 80
     n_axons = 500
     dt = 0.025
@@ -126,18 +135,18 @@ if __name__ == "__main__":
     scs_pulses = [1 if np.mod(x, int(1/hz*1000/dt)) == 0 else 0 for x in range(t_vec_len)] # pulses from SCS
 
     # max
-    release_control_ux = get_ia_afferent_release_prob(time, hz, n_axons, p_axonal_success=0.9)
+    release_control_ux = get_ia_afferent_release_prob(time, hz, n_axons, Tx=20)
     total_release = np.array([sum([(120+t in r) for r in release_control_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
     t = np.linspace(0, time, len(total_release))
     plt.figure(2)
-    plt.plot(t, total_release/total_release[0], label='Max')
+    plt.plot(t, total_release/total_release[0], label=f'Tx=20')
 
     # rest
-    release_high_ux = get_ia_afferent_release_prob(time, hz, n_axons, p_axonal_success=0.5)
+    release_high_ux = get_ia_afferent_release_prob(time, hz, n_axons, Tx=100)
     total_release = np.array([sum([(120+t in r) for r in release_high_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
     
     plt.figure(2)
-    plt.plot(t, total_release/total_release[0], label='Rest')
+    plt.plot(t, total_release/total_release[0], label='Tx=100')
 
     plt.legend()
 
