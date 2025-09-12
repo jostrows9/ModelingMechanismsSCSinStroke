@@ -199,3 +199,6 @@ arm64/
 
 
 data/
+
+
+*.DS_Store
