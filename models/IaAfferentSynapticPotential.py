@@ -1,155 +1,150 @@
-import os
-import pickle
 import random
 import numpy as np
 import matplotlib.pyplot as plt
 
-### STATIC PARAMETERS
-Cm = 2 # uF/cm^2
-J = 0.085*Cm # synaptic weight, tuned to single EPSP of ~200uV
-Uw = 0.6 # Uw < 1, probability of vesicle release, OG: 0.06
-n_vesicle = 5 # number of vesicle docking sites
-
-def calculate_alpha(t, T1, T2, syn_w): 
-    if np.heaviside(t, t) == 0: 
-        return 0
-    return (syn_w/(T2-T1))*np.heaviside(t, t)*(np.exp(-t/T2)-np.exp(-t/T1)) # post-synaptic conductance waveform
-
-def get_ia_afferent_synaptic_potential(sim_dur, 
-                                       scs_freq, 
-                                       n_axons, 
-                                       Tw=25, 
-                                       p_axonal_success=1, 
-                                       Ux=2.5e-3,
-                                       dt=0.025, 
-                                       seed=0): 
-    # check if previous-run exists 
-    # file_path = f"data/synaptic_potentials/synaptic_potential_SCS_freq_{scs_freq}_n_axons_{n_axons}_tw_{Tw}_p_success_{p_axonal_success}_dt_{dt}_simulation_duration_{sim_dur}_Ux_{Ux}.pickle"
-    # if os.path.exists(file_path):
-    #     with open(file_path, 'rb') as f: 
-    #         data = pickle.load(f)
-    #         print("Synaptic potentials file already exists. Returning loaded data.")
-    #         return data['conductance']
-
-    np.random.seed(seed) # set the seed so the network is always the same
-    
-    # set up variables related to conductance
-    t_vec_len = int(sim_dur/dt)
-    g = np.zeros([n_axons, t_vec_len]) # postsynaptic conductance 
-    T1 = 1/dt # dt steps
-    T2 = 4/dt # dt steps
-    
-    # random synaptic weight per axon
-    synaptic_shape = 1.2
-    syn_ws = np.random.gamma(synaptic_shape, scale=J/synaptic_shape, size=n_axons)
-
-    release_prob = get_ia_afferent_release_prob(sim_dur, 
-                                                scs_freq=scs_freq, 
-                                                n_axons=n_axons, 
-                                                Tw=Tw, 
-                                                p_axonal_success=p_axonal_success, 
-                                                Ux=Ux, 
-                                                dt=dt)
-    
-    for t in range(t_vec_len): 
-        for j in range(n_axons): 
-            g[j][t] = np.sum([calculate_alpha(t-release_t, T1, T2, syn_ws[j]) for release_t in release_prob[j]]) 
-
-    # save data
-    data = {}
-    data['conductance'] = g
-    data['release'] = release_prob
-    # with open(file_path, 'wb') as f: 
-    #     pickle.dump(data, f)
-
-    return g
-
+n_vesicle = 2
 
 def get_ia_afferent_release_prob(sim_dur, 
-                                       scs_freq, 
-                                       n_axons, 
-                                       Tw=20, 
-                                       Tx=27,
-                                       p_axonal_success=1, 
-                                       Ux=0.1, # OG: 0.0025,
-                                       dt=0.025): 
+                                scs_freq, 
+                                n_axons, 
+                                Tb=100, 
+                                Ta=20,
+                                Tf=300, 
+                                Ub=0.7, # probability of synaptic release
+                                Ua=0.7, # OG: 0.0025, probability of axonal refractory period
+                                Uf=0.99, # facilitation increment per spike
+                                dt=0.025,
+                                F0=0.5,
+                                seed=672944, 
+                                plot=False): 
     """
     Function for modeling axonal and synaptic failure in response to stimulation. 
 
-    Somatic spikes: innate Ia-firing (TODO: figure out if we remove this, or use this as proprioceptive info that must be maintained)
-    Spinal cord stimulation: electrical stimulation to Ia-afferents.
-
-    Somatic and SCS spikes constitute a "nascent spike", which may or may not travel to the MN itself, 
+    SCS spikes constitute a "nascent spike", which may or may not travel to the MN itself, 
     either because of axonal or synaptic failure.
 
-    The following function predicts the postsynaptic conductance after axonal and synaptic failure.
+    The following function predicts the success or failure of spikes after axonal and synaptic failure.
     """
-   
+    np.random.seed(seed)
+
     # adjust time-based parameters to dt 
-    L = 3/dt # spike latency 
-    Tx = Tx/dt # time constant for recovery # OG: 27
-    Tw = Tw/dt # dt steps, mean of exponentially-distributed random variable for wait time before recovery, OG: 850
+    Ta = Ta/dt # time constant for recovery of axon # OG: 27
+    Tb = Tb/dt # dt steps, mean of exponentially-distributed random variable for wait time before recovery, OG: 850
+    Tf = Tf/dt # dt steps, time constant for facilitation
 
     # set up variables 
     t_vec_len = int(sim_dur/dt)
-    n_all = np.random.poisson(lam=n_vesicle, size=[n_axons, t_vec_len]) # docked vesicles in each synapse, 0 < n_j < 5
     p = np.ones([n_axons, t_vec_len]) # probability of vesicle release
+    n_all = n_vesicle*np.ones([n_axons, t_vec_len]) # docked vesicles in each synapse
     x = np.ones([n_axons, t_vec_len]) # probability of action potential success in each axon, at each time t
-    release = [[] for _ in range(n_axons)] # time of release of vesicles
+    F = np.ones([n_axons, t_vec_len])*F0 # facilitation factors
+    release = [[] for _ in range(n_axons)] # time of successful spikes
     scs_pulses = [1 if np.mod(x, int(1/scs_freq*1000/dt)) == 0 else 0 for x in range(t_vec_len)] # pulses from SCS
 
-    # run simulation of axonal and synaptic failure, predict postsynaptic potential
-    for t in range(t_vec_len): 
+    # run simulation of axonal and synaptic failure, predict spike train
+    for t in range(t_vec_len - 1): 
         for j in range(n_axons): 
-            if (scs_pulses[t] == 1):      
-                if (random.random() < x[j][t]): # if spike succeeds
-                    t_spike = t + int(L) # spike time
-                    if t_spike < t_vec_len:
-                        p[j][t_spike] = 1-(1-Uw)**n_all[j][t]
-                        redock_time = np.random.exponential(Tw)
-                        redock_time = int(np.round(np.min([t_vec_len-t_spike, redock_time])))
-                        n_all[j][t_spike:] = np.max([0, n_all[j][t_spike]-1])
-                        n_all[j][t_spike+redock_time:] += 1 
-                        if random.random() < p[j][t_spike]: 
-                            release[j].append(t_spike)
+            x[j][t+1] = x[j][t] + (-x[j][t] + 1)/Ta # axonal recovery
+            F[j][t+1] = F[j][t] * (1 - 1/Tf) # facilitation decay
+            if (scs_pulses[t] == 1) & (random.random() <= 1): # if SCS pulse + additional randomness   
+                if (random.random() <= x[j][t]): # if axonal success
+                    p[j][t] = 1-(1-Ub)**n_all[j][t] 
+                    p[j][t] *= F[j][t] # facilitation impact on p(synapse)
+                    
+                    if random.random() <= p[j][t]: # if synaptic success 
+                        redock_time = np.random.exponential(Tb)
+                        redock_time = int(np.round(np.min([t_vec_len-t, redock_time])))
+                        n_all[j][t:] = np.max([0, n_all[j][t]-1])
+                        n_all[j][t+redock_time:] += 1 
+                        release[j].append(t*dt)
+                    
+                    F[j][t+1] = F[j][t] + (1 - F[j][t]) * Uf # facilitation increase with successful spike
 
-                x[j][t:] = x[j][t] - Ux*x[j][t]
+                x[j][t+1] = x[j][t] - Ua*x[j][t] # axonal refractory period
             
-            elif t+1 < t_vec_len:
-                x[j][t+1] = x[j][t]+(-x[j][t] + 1)/Tx # axonal recovery
+    if plot: 
+        plt.figure(2)
+        inds = [s == 1 for s in scs_pulses]
+        x_plot = [a[inds] for a in x]
+        plt.plot(np.mean(x_plot, axis=0), label=f'Ta={Ta*dt}')
+        plt.title('Probability of axonal success')
 
-    plt.figure(1)
-    plt.plot(x[0], label=f"{Tx}")
-    
-    plt.figure(3)
-    plt.plot(p[0])
+        plt.figure(3)
+        p_plot = [s[inds] for s in p]
+        plt.plot(np.mean(p_plot, axis=0), label=f'Ta={Ta*dt}')
+        plt.title('Probability of synaptic success')
+
+        plt.figure(4)
+        f_plot = [f[inds] for f in F]
+        plt.plot(np.mean(f_plot, axis=0), label=f'Ta={Ta*dt}')
+        plt.title('Synaptic facilitation')
     return release
 
 
 if __name__ == "__main__":
-    time = 2000 # ms
+    time = 12.5*100 # ms
     hz = 80
     n_axons = 500
     dt = 0.025
     t_vec_len = int(time/dt)
     scs_pulses = [1 if np.mod(x, int(1/hz*1000/dt)) == 0 else 0 for x in range(t_vec_len)] # pulses from SCS
 
+    start_ind = 0
+
     # max
-    release_control_ux = get_ia_afferent_release_prob(time, hz, n_axons, Tx=20)
-    total_release = np.array([sum([(120+t in r) for r in release_control_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
+    Ta = 5
+    release_control_ux = get_ia_afferent_release_prob(time, hz, n_axons, Ta=Ta, plot=True)
+    total_release = np.array([sum([(t*dt in r) for r in release_control_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
     t = np.linspace(0, time, len(total_release))
-    plt.figure(2)
-    plt.plot(t, total_release/total_release[0], label=f'Tx=20')
+    plt.figure(1)
+    plt.plot(t[start_ind:], total_release[start_ind:]/total_release[start_ind], label=f'Ta={Ta}')
+
+    plt.figure(5)
+    max_ind = np.argmax(total_release)
+    plt.plot(t[:len(t)-max_ind], total_release[max_ind:]/np.max(total_release), label=f'Ta={Ta}')
 
     # rest
-    release_high_ux = get_ia_afferent_release_prob(time, hz, n_axons, Tx=100)
-    total_release = np.array([sum([(120+t in r) for r in release_high_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
-    
-    plt.figure(2)
-    plt.plot(t, total_release/total_release[0], label='Tx=100')
-
-    plt.legend()
-
+    Ta = 50
+    release_high_ux = get_ia_afferent_release_prob(time, hz, n_axons, Ta=Ta, plot=True)
+    total_release = np.array([sum([(t*dt in r) for r in release_high_ux]) for t in range(t_vec_len) if scs_pulses[t] == 1])
     plt.figure(1)
+    plt.plot(t[start_ind:], total_release[start_ind:]/total_release[start_ind], label='Ta={Ta}')
     plt.legend()
+
+    plt.figure(5)    
+    max_ind = np.argmax(total_release)
+    plt.plot(t[:len(t)-max_ind], total_release[max_ind:]/np.max(total_release), label=f'Ta={Ta}')
+    plt.legend()
+
+    plt.figure(2)
+    plt.legend()
+
+    plt.figure(3)
+    plt.legend()
+
+
     plt.show()
+
+
+
+    
+
+
+
+
+# Works?? w/ rest = 5, max = 50; need less depression still
+#     n_vesicle = 2
+
+# def get_ia_afferent_release_prob(sim_dur, 
+#                                 scs_freq, 
+#                                 n_axons, 
+#                                 Tb=100, 
+#                                 Ta=20,
+#                                 Tf=300, 
+#                                 Ub=0.7, # probability of synaptic release
+#                                 Ua=0.7, # OG: 0.0025, probability of axonal refractory period
+#                                 Uf=0.99, # facilitation increment per spike
+#                                 dt=0.025, 
+#                                 F0=0.5,
+#                                 seed=672945, 
+#                                 plot=False): 

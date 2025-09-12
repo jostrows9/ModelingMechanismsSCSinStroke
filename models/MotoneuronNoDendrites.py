@@ -40,7 +40,7 @@ class MotoneuronNoDendrites():
 
 	def current_soma(self, amplitude, duration, delay):
 		"""
-		Current clamp to motoneuron soma. TODO: remove? 
+		Current clamp to motoneuron soma.
 		"""
 		iclamp=h.IClamp(self.soma(0.5))
 
